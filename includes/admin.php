@@ -4,6 +4,44 @@
  * Admin settings for Shopify Sitemap Integrator
  */
 
+/**
+ * Sanitize and validate domain input
+ *
+ * @param string $domain The domain to sanitize
+ * @return string Sanitized domain
+ */
+function shopify_sitemap_sanitize_domain($domain)
+{
+  // First, do basic sanitization
+  $domain = sanitize_text_field($domain);
+
+  // Remove protocol if present
+  $domain = preg_replace('#^https?://#i', '', $domain);
+
+  // Remove trailing slash
+  $domain = rtrim($domain, '/');
+
+  // Remove any path components
+  $domain = preg_replace('#/.*$#', '', $domain);
+
+  // Validate using the validation function
+  if (function_exists('shopify_sitemap_validate_domain')) {
+    if (!shopify_sitemap_validate_domain($domain)) {
+      // If validation fails, add an error notice
+      add_settings_error(
+        'shopify_sitemap_domain',
+        'invalid_domain',
+        __('Invalid Shopify domain. Please enter a valid .myshopify.com domain or custom Shopify domain.', 'shopify-to-wordpress-sitemap'),
+        'error'
+      );
+      // Return the old value
+      return get_option('shopify_sitemap_domain', '');
+    }
+  }
+
+  return $domain;
+}
+
 // Add admin menu
 add_action('admin_menu', 'shopify_sitemap_admin_menu');
 function shopify_sitemap_admin_menu()
@@ -58,7 +96,7 @@ function shopify_sitemap_register_settings()
     'shopify_sitemap_settings',
     'shopify_sitemap_domain',
     array(
-      'sanitize_callback' => 'sanitize_text_field',
+      'sanitize_callback' => 'shopify_sitemap_sanitize_domain',
       'default' => '',
     )
   );
@@ -186,6 +224,26 @@ function shopify_sitemap_admin_actions()
         shopify_sitemap_log('Manual update requested');
       }
 
+      // Rate limiting - prevent spam updates (max 1 update per 30 seconds)
+      $last_update = get_transient('shopify_sitemap_last_manual_update');
+      if ($last_update !== false) {
+        $time_since_last = time() - $last_update;
+        if ($time_since_last < 30) {
+          // Too soon, redirect with error
+          $redirect = add_query_arg(array(
+            'page' => 'shopify-sitemap',
+            'updated' => 'rate_limited',
+            'wait' => 30 - $time_since_last
+          ), admin_url('options-general.php'));
+
+          wp_safe_redirect($redirect);
+          exit;
+        }
+      }
+
+      // Set rate limit timestamp
+      set_transient('shopify_sitemap_last_manual_update', time(), MINUTE_IN_SECONDS);
+
       // Delete existing transient data
       delete_transient('shopify_sitemap_data');
       delete_transient('shopify_sitemap_is_index');
@@ -245,7 +303,7 @@ function shopify_sitemap_debug_section_text()
   echo '<li><strong>PHP Version:</strong> ' . PHP_VERSION . '</li>';
   echo '<li><strong>WordPress Version:</strong> ' . get_bloginfo('version') . '</li>';
   echo '<li><strong>Plugin Version:</strong> ' . SHOPIFY_SITEMAP_VERSION . '</li>';
-  echo '<li><strong>Server:</strong> ' . (isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : 'Unknown') . '</li>';
+  echo '<li><strong>Server:</strong> ' . esc_html(isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : 'Unknown') . '</li>';
   echo '</ul>';
 
   // Display transient data status

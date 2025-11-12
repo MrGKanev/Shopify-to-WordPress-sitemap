@@ -5,6 +5,113 @@
  */
 
 /**
+ * Validate Shopify domain to prevent SSRF attacks.
+ *
+ * @param string $domain The domain to validate
+ * @return bool True if valid, false otherwise
+ */
+function shopify_sitemap_validate_domain($domain)
+{
+  if (empty($domain) || !is_string($domain)) {
+    return false;
+  }
+
+  // Remove any protocol if present
+  $domain = preg_replace('#^https?://#i', '', $domain);
+
+  // Remove trailing slash
+  $domain = rtrim($domain, '/');
+
+  // Check for valid domain format
+  if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9\-\.]*[a-zA-Z0-9]$/', $domain)) {
+    return false;
+  }
+
+  // Must end with .myshopify.com or be a custom domain with proper TLD
+  if (strpos($domain, '.myshopify.com') !== false) {
+    // Validate it's a proper myshopify.com subdomain
+    if (!preg_match('/^[a-zA-Z0-9\-]+\.myshopify\.com$/', $domain)) {
+      return false;
+    }
+  } else {
+    // For custom domains, ensure it has a valid TLD and doesn't contain private IPs
+    if (!preg_match('/^[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}$/', $domain)) {
+      return false;
+    }
+
+    // Block local/private addresses
+    $ip = gethostbyname($domain);
+    if ($ip !== $domain) {
+      // Check if it resolves to a private IP
+      if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Make a safe HTTP request with validation and limits.
+ *
+ * @param string $url The URL to fetch
+ * @param array $args Optional arguments for wp_remote_get
+ * @return array|WP_Error Response array or WP_Error on failure
+ */
+function shopify_sitemap_safe_request($url, $args = array())
+{
+  // Parse URL
+  $parsed_url = wp_parse_url($url);
+
+  if (!$parsed_url || empty($parsed_url['host'])) {
+    return new WP_Error('invalid_url', 'Invalid URL provided');
+  }
+
+  // Validate the domain
+  if (!shopify_sitemap_validate_domain($parsed_url['host'])) {
+    return new WP_Error('invalid_domain', 'Invalid or potentially unsafe domain');
+  }
+
+  // Ensure HTTPS
+  if (isset($parsed_url['scheme']) && $parsed_url['scheme'] !== 'https') {
+    return new WP_Error('insecure_connection', 'Only HTTPS connections are allowed');
+  }
+
+  // Set default args with security in mind
+  $default_args = array(
+    'timeout' => 30,
+    'user-agent' => 'WordPress/Shopify-Sitemap-Integrator',
+    'sslverify' => true,
+    'httpversion' => '1.1',
+  );
+
+  $args = wp_parse_args($args, $default_args);
+
+  // Make the request
+  $response = wp_remote_get($url, $args);
+
+  // Check for errors
+  if (is_wp_error($response)) {
+    return $response;
+  }
+
+  // Check response code
+  $status_code = wp_remote_retrieve_response_code($response);
+  if ($status_code !== 200) {
+    return new WP_Error('http_error', 'HTTP error: ' . $status_code);
+  }
+
+  // Check response size (limit to 10MB)
+  $body = wp_remote_retrieve_body($response);
+  if (strlen($body) > 10 * 1024 * 1024) {
+    return new WP_Error('response_too_large', 'Response exceeds maximum allowed size');
+  }
+
+  return $response;
+}
+
+/**
  * Generate the sitemap XML.
  */
 function shopify_sitemap_generate_xml()
@@ -131,23 +238,20 @@ function shopify_sitemap_update()
     return false;
   }
 
-  // Fetch the sitemap
-  $response = wp_remote_get('https://' . $domain . '/' . $path, array(
-    'timeout' => 30,
-    'user-agent' => 'WordPress/Shopify-Sitemap-Integrator'
-  ));
-
-  if (is_wp_error($response)) {
+  // Validate domain before making request
+  if (!shopify_sitemap_validate_domain($domain)) {
     if (function_exists('shopify_sitemap_log')) {
-      shopify_sitemap_log('WP Error fetching sitemap: ' . $response->get_error_message());
+      shopify_sitemap_log('Invalid or unsafe domain: ' . $domain);
     }
     return false;
   }
 
-  $status_code = wp_remote_retrieve_response_code($response);
-  if ($status_code !== 200) {
+  // Fetch the sitemap using safe request function
+  $response = shopify_sitemap_safe_request('https://' . $domain . '/' . $path);
+
+  if (is_wp_error($response)) {
     if (function_exists('shopify_sitemap_log')) {
-      shopify_sitemap_log('HTTP error fetching sitemap. Status code: ' . $status_code);
+      shopify_sitemap_log('Error fetching sitemap: ' . $response->get_error_message());
     }
     return false;
   }
@@ -255,15 +359,12 @@ function shopify_sitemap_flatten_index($sitemap_entries)
       shopify_sitemap_log('Fetching linked sitemap: ' . $sitemap['loc']);
     }
 
-    // Fetch the linked sitemap
-    $response = wp_remote_get($sitemap['loc'], array(
-      'timeout' => 30,
-      'user-agent' => 'WordPress/Shopify-Sitemap-Integrator'
-    ));
+    // Fetch the linked sitemap using safe request
+    $response = shopify_sitemap_safe_request($sitemap['loc']);
 
-    if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+    if (is_wp_error($response)) {
       if (function_exists('shopify_sitemap_log')) {
-        shopify_sitemap_log('Failed to fetch linked sitemap: ' . $sitemap['loc']);
+        shopify_sitemap_log('Failed to fetch linked sitemap: ' . $sitemap['loc'] . ' - ' . $response->get_error_message());
       }
       continue;
     }
@@ -308,7 +409,7 @@ function shopify_sitemap_parse_index($xml)
   $sitemaps = array();
   $dom = new DOMDocument();
 
-  if (@$dom->loadXML($xml)) {
+  if ($dom->loadXML($xml)) {
     $sitemap_nodes = $dom->getElementsByTagName('sitemap');
 
     if (function_exists('shopify_sitemap_log')) {
@@ -362,7 +463,7 @@ function shopify_sitemap_parse_sitemap($xml)
   $urls = array();
   $dom = new DOMDocument();
 
-  if (@$dom->loadXML($xml)) {
+  if ($dom->loadXML($xml)) {
     $url_nodes = $dom->getElementsByTagName('url');
 
     if (function_exists('shopify_sitemap_log')) {
