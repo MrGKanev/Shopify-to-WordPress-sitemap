@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Shopify Sitemap Integrator
  * Description: Fetches a Shopify sitemap and adds it to your WordPress site.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Gabriel Kanev
  * Author URI: https://gkanev.com
  * Plugin URI: https://github.com/MrGKanev/Shopify-to-WordPress-sitemap
@@ -24,7 +24,7 @@ if (!defined('WPINC')) {
 // Define plugin constants
 define('SHOPIFY_SITEMAP_DIR', plugin_dir_path(__FILE__));
 define('SHOPIFY_SITEMAP_DEFAULT_OUTPUT', 'store.xml');
-define('SHOPIFY_SITEMAP_VERSION', '1.1.0');
+define('SHOPIFY_SITEMAP_VERSION', '1.2.0');
 
 /**
  * Enhanced debug logging for local environments
