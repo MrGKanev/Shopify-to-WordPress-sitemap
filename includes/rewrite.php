@@ -50,7 +50,7 @@ function shopify_sitemap_handle_request()
     shopify_sitemap_log('Template redirect check - shopify_sitemap var: ' . $query_var);
   }
 
-  if (isset($wp_query->query_vars['shopify_sitemap']) && $wp_query->query_vars['shopify_sitemap'] == '1') {
+  if (isset($wp_query->query_vars['shopify_sitemap']) && $wp_query->query_vars['shopify_sitemap'] === '1') {
     if (function_exists('shopify_sitemap_log')) {
       shopify_sitemap_log('Handling sitemap request');
     }

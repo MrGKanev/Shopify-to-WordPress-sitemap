@@ -71,4 +71,4 @@ Created by [Gabriel Kanev](https://gkanev.com)
 
 ## Tested up to
 
-WordPress 6.8
+WordPress 6.7

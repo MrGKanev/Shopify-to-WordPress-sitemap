@@ -3,13 +3,17 @@
 /**
  * Plugin Name: Shopify Sitemap Integrator
  * Description: Fetches a Shopify sitemap and adds it to your WordPress site.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Gabriel Kanev
  * Author URI: https://gkanev.com
  * Plugin URI: https://github.com/MrGKanev/Shopify-to-WordPress-sitemap
  * License: GPL-2.0+
  * License URI: http://www.gnu.org/licenses/gpl-2.0.txt
  * Requires PHP: 7.4
+ * Requires at least: 5.0
+ * Tested up to: 6.7
+ * Text Domain: shopify-to-wordpress-sitemap
+ * Domain Path: /languages
  */
 
 // If this file is called directly, abort.
@@ -20,7 +24,7 @@ if (!defined('WPINC')) {
 // Define plugin constants
 define('SHOPIFY_SITEMAP_DIR', plugin_dir_path(__FILE__));
 define('SHOPIFY_SITEMAP_DEFAULT_OUTPUT', 'store.xml');
-define('SHOPIFY_SITEMAP_VERSION', '1.1.0');
+define('SHOPIFY_SITEMAP_VERSION', '1.2.0');
 
 /**
  * Enhanced debug logging for local environments
@@ -142,14 +146,28 @@ function shopify_sitemap_admin_notice()
 
   // Show update status message if applicable
   if (isset($_GET['page']) && $_GET['page'] === 'shopify-sitemap' && isset($_GET['updated'])) {
-    $success = $_GET['updated'] === 'true';
-  ?>
-    <div class="notice notice-<?php echo $success ? 'success' : 'error'; ?> is-dismissible">
-      <p><?php echo $success
-            ? esc_html__('Shopify sitemap updated successfully!', 'shopify-to-wordpress-sitemap')
-            : esc_html__('Failed to update Shopify sitemap. Please check your domain and sitemap path settings.', 'shopify-to-wordpress-sitemap'); ?></p>
-    </div>
-<?php
+    $status = sanitize_text_field($_GET['updated']);
+
+    if ($status === 'rate_limited') {
+      $wait_time = isset($_GET['wait']) ? intval($_GET['wait']) : 30;
+    ?>
+      <div class="notice notice-warning is-dismissible">
+        <p><?php echo sprintf(
+          esc_html__('Please wait %d seconds before updating the sitemap again. This prevents excessive requests to Shopify.', 'shopify-to-wordpress-sitemap'),
+          $wait_time
+        ); ?></p>
+      </div>
+    <?php
+    } else {
+      $success = $status === 'true';
+    ?>
+      <div class="notice notice-<?php echo $success ? 'success' : 'error'; ?> is-dismissible">
+        <p><?php echo $success
+              ? esc_html__('Shopify sitemap updated successfully!', 'shopify-to-wordpress-sitemap')
+              : esc_html__('Failed to update Shopify sitemap. Please check your domain and sitemap path settings.', 'shopify-to-wordpress-sitemap'); ?></p>
+      </div>
+    <?php
+    }
   }
 }
 add_action('admin_notices', 'shopify_sitemap_admin_notice');
